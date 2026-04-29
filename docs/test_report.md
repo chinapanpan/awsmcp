@@ -23,6 +23,9 @@
 | S3 存储桶查询 | ✅ 通过 | 成功列出 100 个 S3 存储桶 |
 | EC2 实例查询 | ✅ 通过 | 成功列出 3 个运行中的 EC2 实例 |
 | 端到端调用链 | ✅ 通过 | 外部Client → Remote MCP → Agent → aws-api-mcp → AWS |
+| Skill 加载 (current_time) | ✅ 通过 | builtin skill 从配置加载并被 Agent 正确调用 |
+| Skill 获取时间 | ✅ 通过 | Agent 调用 current_time skill 返回实时 UTC 时间 |
+| IAM 用户列表查询 | ✅ 通过 | MCP + Skill 混合加载后 AWS 操作仍正常 |
 
 ## 详细测试记录
 
@@ -77,6 +80,40 @@ Available tools (2):
 
 ---
 
+### 测试 4: Skill 加载与调用 (current_time)
+
+**目标**：验证 builtin Skill 能通过配置文件加载，Agent 能正确调用。
+
+**配置**：
+```json
+{ "name": "current_time", "enabled": true, "type": "builtin", "module": "strands_tools.current_time" }
+```
+
+**启动日志**：
+```
+AWS Agent ready with 1 MCP server(s) and 1 skill(s)
+```
+
+**输入**: `"请告诉我现在的时间"`
+
+**结果**：Agent 调用 `current_time` skill，返回：**2026年4月29日 07:50:18（UTC）**
+
+**状态**: ✅ 通过
+
+---
+
+### 测试 5: MCP + Skill 混合工作
+
+**目标**：验证 MCP Server 和 Skill 同时加载后，AWS 操作仍然正常。
+
+**输入**: `"查看IAM用户列表"`
+
+**结果**：Agent 通过 aws-api-mcp-server 成功返回 **5 个 IAM 用户**（bedrock, ide-invoke, s3, zpftest2, zpftest3），包含用户 ID、创建时间、最后登录时间等信息。
+
+**状态**: ✅ 通过
+
+---
+
 ## 架构验证
 
 ### 调用链路验证
@@ -96,13 +133,15 @@ Test Client (MCP Client)
 ```
 
 ### 配置驱动验证
-- `agent_config.json` 中的 MCP Server 配置成功加载
-- 通过修改配置文件可以切换模型 ID、添加/禁用 MCP Server，无需修改代码
+- `agent_config.json` 中的 MCP Server 和 Skill 配置均成功加载
+- MCP Server 和 Skill 可以同时工作，互不干扰
+- 通过修改配置文件可以切换模型 ID、添加/禁用 MCP Server 和 Skill，无需修改代码
 
 ## 结论
 
 所有测试用例均通过。系统成功实现了：
-1. **Strands Agent** 集成 **aws-api-mcp-server**，获得完整的 AWS 操作能力
+1. **Strands Agent** 集成 **aws-api-mcp-server** (MCP) + **current_time** (Skill)
 2. Agent 封装为 **Remote MCP Server**，通过 streamable-http 对外暴露
 3. 外部客户端可通过标准 MCP 协议调用 Agent 能力
-4. 配置驱动架构，新增 MCP Server 或调整参数只需修改 JSON 配置文件
+4. **配置驱动架构**：MCP Server 和 Skill 均通过 `agent_config.json` 管理，新增/禁用只需改配置、重启服务
+5. 支持三种 Skill 类型：builtin（内置）、custom（自定义 .py）、package（pip 安装）

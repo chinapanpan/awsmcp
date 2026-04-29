@@ -1,6 +1,6 @@
 # AWS Agent Remote MCP Server
 
-基于 Strands Agents SDK 开发的 AWS 云服务 AI Agent，集成 aws-api-mcp-server，并封装为 Remote MCP Server 供外部 Agent 调用。
+基于 Strands Agents SDK 开发的 AWS 云服务 AI Agent，集成 aws-api-mcp-server 和可扩展 Skill 系统，封装为 Remote MCP Server 供外部 Agent 调用。
 
 ## 架构
 
@@ -10,8 +10,9 @@
 Remote MCP Server (FastMCP)
     ↓
 Strands Agent (Claude Sonnet 4.6 via Bedrock)
-    ↓ MCP (stdio)
-aws-api-mcp-server
+    ↓                    ↓
+MCP Servers           Skills
+(aws-api 等)     (builtin/custom/package)
     ↓
 AWS Cloud Services
 ```
@@ -31,25 +32,36 @@ python3.12 scripts/test_client.py
 
 ## 配置驱动扩展
 
-编辑 `agent_config.json` 即可添加新的 MCP Server，无需修改代码：
+所有能力通过 `agent_config.json` 配置，无需修改代码。
+
+### 添加 MCP Server
 
 ```json
 {
-  "mcp_servers": [
-    {
-      "name": "new-mcp-server",
-      "enabled": true,
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["some-mcp-server@latest"],
-      "env": {},
-      "startup_timeout": 60
-    }
-  ]
+  "name": "filesystem",
+  "enabled": true,
+  "type": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 }
 ```
 
-重启服务后，Agent 自动集成新工具。
+### 添加 Skill
+
+三种方式：
+
+```json
+// 内置 Skill (strands_tools 库)
+{ "name": "calculator", "enabled": true, "type": "builtin", "module": "strands_tools.calculator" }
+
+// 自定义 Skill (本地 Python 文件)
+{ "name": "my_skill", "enabled": true, "type": "custom", "path": "./skills/my_skill.py" }
+
+// 第三方包 Skill (pip install 后配置)
+{ "name": "some_tool", "enabled": true, "type": "package", "module": "some_package.some_tool" }
+```
+
+重启服务后，Agent 自动集成所有新能力。
 
 ## 暴露的 MCP 工具
 

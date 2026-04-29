@@ -18,21 +18,29 @@
       "startup_timeout": 120
     }
   ],
+  "skills": [
+    {
+      "name": "current_time",
+      "enabled": true,
+      "type": "builtin",
+      "module": "strands_tools.current_time"
+    },
+    {
+      "name": "think",
+      "enabled": false,
+      "type": "builtin",
+      "module": "strands_tools.think"
+    },
+    {
+      "name": "example_custom_skill",
+      "enabled": false,
+      "type": "custom",
+      "path": "./skills/example_custom_skill.py"
+    }
+  ],
   "remote_mcp_server": {
     "name": "aws-agent-mcp-server",
     "host": "0.0.0.0",
-    "port": 8080,
-    "tools": [
-      {
-        "name": "aws_agent_chat",
-        "description": "与 AWS 专家 Agent 进行自然语言对话。可以询问 AWS 相关问题、查询资源状态、执行云服务操作等。",
-        "enabled": true
-      },
-      {
-        "name": "aws_agent_execute",
-        "description": "执行特定的 AWS 云服务操作任务。适用于明确的操作指令。",
-        "enabled": true
-      }
-    ]
+    "port": 8080
   }
 }
