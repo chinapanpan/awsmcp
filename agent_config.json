@@ -20,22 +20,12 @@
   ],
   "skills": [
     {
-      "name": "current_time",
-      "enabled": true,
-      "type": "builtin",
-      "module": "strands_tools.current_time"
+      "source": "./skills/aws-cost-advisor",
+      "enabled": true
     },
     {
-      "name": "think",
-      "enabled": false,
-      "type": "builtin",
-      "module": "strands_tools.think"
-    },
-    {
-      "name": "example_custom_skill",
-      "enabled": false,
-      "type": "custom",
-      "path": "./skills/example_custom_skill.py"
+      "source": "./skills/aws-security-check",
+      "enabled": true
     }
   ],
   "remote_mcp_server": {

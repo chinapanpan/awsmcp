@@ -77,19 +77,22 @@
 ```
 awsmcp/
 ├── docs/
-│   ├── design.md           # 技术方案设计文档
-│   └── test_report.md      # 测试验证报告
+│   ├── design.md               # 技术方案设计文档
+│   └── test_report.md          # 测试验证报告
 ├── src/
 │   ├── __init__.py
-│   ├── agent.py            # Strands Agent 核心（配置驱动加载 MCP + Skill）
-│   ├── mcp_server.py       # Remote MCP Server 封装
-│   └── config.py           # 配置管理
-├── skills/                 # 自定义 Skill 目录（放入 .py 文件即可）
-│   └── example_custom_skill.py  # Skill 模板
+│   ├── agent.py                # Strands Agent 核心（配置驱动加载 MCP + Skill）
+│   ├── mcp_server.py           # Remote MCP Server 封装
+│   └── config.py               # 配置管理
+├── skills/                     # Skill 目录（每个子目录含 SKILL.md）
+│   ├── aws-cost-advisor/
+│   │   └── SKILL.md            # 费用分析 Skill
+│   └── aws-security-check/
+│       └── SKILL.md            # 安全检查 Skill
 ├── scripts/
-│   ├── start_server.sh     # 启动脚本
-│   └── test_client.py      # 测试客户端
-├── agent_config.json       # ★ 核心配置（MCP + Skill + Agent 参数全在此）
+│   ├── start_server.sh         # 启动脚本
+│   └── test_client.py          # 测试客户端
+├── agent_config.json           # ★ 核心配置（MCP + Skill + Agent 参数全在此）
 ├── requirements.txt
 └── README.md
 ```
@@ -104,9 +107,9 @@ awsmcp/
 
 #### 4.2.2 agent.py - Agent 核心（配置驱动）
 - 从 `agent_config.json` 读取配置
-- 动态加载所有启用的 **MCP Server** (MCPClient)
-- 动态加载所有启用的 **Skill** (builtin/custom/package)
-- 初始化 BedrockModel，创建 Strands Agent
+- 动态加载所有启用的 **MCP Server** (MCPClient, stdio/sse)
+- 动态加载所有启用的 **Skill** (AgentSkills.io SKILL.md, 渐进式加载)
+- 初始化 BedrockModel，创建 Strands Agent (plugins=[AgentSkills])
 - 提供 `chat()` 方法供外部调用
 
 #### 4.2.3 mcp_server.py - Remote MCP Server
@@ -187,86 +190,110 @@ Agent 的所有能力（MCP Server 和 Skill）均通过 `agent_config.json` 配
 | `stdio` | command, args, env | 本地子进程 | uvx/npx 安装的 MCP 包 |
 | `sse` | url | 远程 SSE 连接 | 已部署的 MCP Server |
 
-### 8.4 添加新 Skill
+### 8.4 添加新 Skill（AgentSkills.io SKILL.md 格式）
 
-在 `skills` 数组中添加一项。支持三种 Skill 类型：
+Skill 是基于 [AgentSkills.io](https://agentskills.io) 开放规范的 **Markdown 指令文件**。Agent 通过渐进式加载（Progressive Disclosure）按需激活 Skill。
 
-#### 方式一：内置 Skill（Strands Tools 库）
+#### Skill 目录结构
+
+```
+skills/
+  my-new-skill/
+    SKILL.md          # 必需：YAML frontmatter + Markdown 指令
+    scripts/          # 可选：可执行脚本
+    references/       # 可选：参考文档
+    assets/           # 可选：模板、资源文件
+```
+
+#### SKILL.md 格式
+
+```markdown
+---
+name: my-new-skill
+description: 简短描述，Agent 根据此决定是否激活该 Skill
+allowed-tools: call_aws suggest_aws_commands
+metadata:
+  author: your-team
+  version: "1.0"
+---
+
+# Skill 指令正文
+
+当此 Skill 被激活时，按以下步骤执行：
+
+1. 第一步...
+2. 第二步...
+
+## 输出格式
+按以下格式输出结果：
+- ...
+```
+
+#### 在 agent_config.json 中配置
 
 ```json
 {
-  "name": "current_time",
-  "enabled": true,
-  "type": "builtin",
-  "module": "strands_tools.current_time"
+  "skills": [
+    { "source": "./skills/my-new-skill", "enabled": true },
+    { "source": "./skills/", "enabled": true },
+    { "source": "https://raw.githubusercontent.com/.../SKILL.md", "enabled": true }
+  ]
 }
 ```
 
-可用的内置 Skill 包括：`current_time`, `think`, `calculator`, `http_request`, `shell`, `file_read`, `file_write`, `python_repl`, `use_aws` 等 40+ 个。
+支持的 source 类型：
 
-#### 方式二：自定义 Skill（本地 Python 文件）
+| 类型 | 示例 | 说明 |
+|------|------|------|
+| 本地目录 | `./skills/my-skill` | 目录中包含 SKILL.md |
+| 父目录 | `./skills/` | 自动扫描所有子目录中的 SKILL.md |
+| HTTPS URL | `https://...SKILL.md` | 从远程加载（marketplace 等） |
 
-```json
-{
-  "name": "my_custom_skill",
-  "enabled": true,
-  "type": "custom",
-  "path": "./skills/my_custom_skill.py"
-}
+#### 渐进式加载机制
+
+```
+Phase 1 (Discovery): 启动时仅加载 name + description (~100 tokens) 注入系统提示
+Phase 2 (Activation): 用户请求匹配时，Agent 调用 skills tool 加载完整指令 (<5000 tokens)
+Phase 3 (Execution): Agent 按指令结合 MCP 工具执行
 ```
 
-自定义 Skill 文件模板（放入 `skills/` 目录）：
+#### 从 Marketplace 获取 Skill
 
-```python
-from strands import tool
-
-@tool
-def my_custom_skill(param1: str, param2: int = 0) -> str:
-    """Skill 描述 — Agent 根据此决定何时调用。
-
-    Args:
-        param1: 参数说明。
-        param2: 参数说明。
-    """
-    return f"Result: {param1}, {param2}"
+```bash
+# 从 agentskills.to / agentskill.sh / GitHub 等下载 SKILL.md 到 skills/ 目录
+# 然后添加一行配置
+{ "source": "./skills/downloaded-skill", "enabled": true }
+# 重启即可
 ```
-
-#### 方式三：第三方包 Skill（pip 安装）
-
-```json
-{
-  "name": "some_tool",
-  "enabled": true,
-  "type": "package",
-  "module": "some_package.tools.some_tool"
-}
-```
-
-从 marketplace 下载后 `pip install xxx`，然后配置 module 路径即可。
 
 ### 8.5 扩展操作流程
 
 ```
-1. 获取新能力（pip install / uvx / 编写 .py 文件 / 部署远程 MCP）
-2. 编辑 agent_config.json，添加对应配置项
-3. 重启服务：./scripts/start_server.sh
-4. Agent 自动集成所有新工具，外部调用者无感知
+添加 MCP:
+  1. pip/uvx/npx 安装 MCP 包
+  2. agent_config.json → mcp_servers 数组加一项
+  3. 重启
+
+添加 Skill:
+  1. 创建 skills/xxx/SKILL.md（或从 marketplace 下载）
+  2. agent_config.json → skills 数组加一项
+  3. 重启
 ```
 
 ### 8.6 其它可配置项
 - **模型切换**：修改 `agent.model_id` 即可切换 Bedrock 模型
 - **System Prompt**：设置 `agent.system_prompt_file` 指向自定义 prompt 文件
 - **端口/Host**：修改 `remote_mcp_server.host/port`
-- **启用/禁用**：任何 MCP 或 Skill 设置 `"enabled": false` 即可关闭
+- **启用/禁用**：MCP 或 Skill 设置 `"enabled": false` 即可关闭
 
 ## 9. 测试方案
 
-### 8.1 测试环境
+### 9.1 测试环境
 - EC2 实例，已配置 IAM Role
 - Python 3.12 + 所有依赖已安装
 
-### 8.2 测试用例
-1. **Agent 基础功能**：Agent 能否正确响应 AWS 相关问题
-2. **AWS 操作**：Agent 能否通过 aws-api-mcp-server 执行真实 AWS 操作
-3. **Remote MCP 连接**：外部客户端能否连接到 Remote MCP Server
-4. **端到端调用**：Claude Code 作为外部 Agent 通过 MCP 调用并获取 AWS 操作结果
+### 9.2 测试用例
+1. **MCP Server 启动**：Agent + MCP + Skills 全部正常加载
+2. **AWS 操作**：通过 aws-api-mcp-server 执行 S3/EC2/IAM 查询
+3. **Skill 激活**：aws-security-check 和 aws-cost-advisor SKILL.md 被正确触发
+4. **端到端**：外部客户端通过 Remote MCP 调用 Agent，Agent 按需激活 Skill + MCP

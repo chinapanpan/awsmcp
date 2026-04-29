@@ -17,98 +17,91 @@
 
 | 测试项 | 状态 | 说明 |
 |--------|------|------|
-| MCP Server 启动 | ✅ 通过 | Server 在 8080 端口正常启动 |
-| aws-api-mcp-server 集成 | ✅ 通过 | 通过 stdio 传输成功连接 |
-| 工具发现 | ✅ 通过 | 客户端成功发现 2 个工具 |
-| S3 存储桶查询 | ✅ 通过 | 成功列出 100 个 S3 存储桶 |
-| EC2 实例查询 | ✅ 通过 | 成功列出 3 个运行中的 EC2 实例 |
-| 端到端调用链 | ✅ 通过 | 外部Client → Remote MCP → Agent → aws-api-mcp → AWS |
-| Skill 加载 (current_time) | ✅ 通过 | builtin skill 从配置加载并被 Agent 正确调用 |
-| Skill 获取时间 | ✅ 通过 | Agent 调用 current_time skill 返回实时 UTC 时间 |
-| IAM 用户列表查询 | ✅ 通过 | MCP + Skill 混合加载后 AWS 操作仍正常 |
+| MCP Server 启动 | ✅ 通过 | 1 MCP + 2 Skills 正常加载 |
+| 工具发现 | ✅ 通过 | 客户端发现 2 个工具 (aws_agent_chat, aws_agent_execute) |
+| AWS S3 查询 | ✅ 通过 | 成功列出 S3 存储桶 |
+| aws_agent_execute | ✅ 通过 | 返回 AWS 账号 ID |
+| Skill: aws-security-check | ✅ 通过 | Agent 激活 SKILL.md，完成系统性安全审计 |
+| Skill: aws-cost-advisor | ✅ 通过 | Agent 激活 SKILL.md，完成 6 个月费用分析 |
+| 端到端调用链 | ✅ 通过 | Client → Remote MCP → Agent → Skill + aws-api-mcp → AWS |
 
 ## 详细测试记录
 
 ### 测试 1: MCP Server 启动与工具发现
 
-**目标**：验证 Remote MCP Server 能正常启动，外部客户端能连接并发现工具。
-
-**过程**：
-1. 运行 `python3.12 -m src.mcp_server` 启动服务
-2. 使用 `scripts/test_client.py` 连接 `http://localhost:8080/mcp/`
-3. 调用 `list_tools()` 获取工具列表
-
-**结果**：
+**服务端日志**：
 ```
-Connected and initialized!
+src.agent: MCP server 'aws-api' queued
+src.agent: Skill source resolved: .../skills/aws-cost-advisor
+src.agent: Skill source resolved: .../skills/aws-security-check
+src.agent: AgentSkills plugin loaded with 2 source(s)
+src.agent: AWS Agent ready with 1 MCP server(s) and 2 skill source(s)
+Uvicorn running on http://0.0.0.0:8080
+```
 
-Available tools (2):
-  - aws_agent_chat: 与 AWS 专家 Agent 进行自然语言对话...
-  - aws_agent_execute: 执行特定的 AWS 云服务操作任务...
+**客户端发现工具**：
+```
+Tools: 2
+  - aws_agent_chat
+  - aws_agent_execute
 ```
 
 **状态**: ✅ 通过
 
 ---
 
-### 测试 2: S3 存储桶查询
+### 测试 2: AWS 操作 — S3 列表
 
-**目标**：验证 Agent 能通过 aws-api-mcp-server 执行 AWS CLI 命令。
+**输入**: `"列出前3个S3存储桶"`
 
-**输入**: `"列出当前AWS账号下的S3存储桶"`
-
-**结果**：Agent 成功调用 `aws s3 ls`，返回了当前 AWS 账号下的 **100 个 S3 存储桶**，并进行了分类整理（按业务类型分组），包含创建时间等详细信息。
+**结果**: 成功返回 3 个存储桶（340636688520-23-12-25-03-35-29-bucket, 340636688520-rag-translate-bucket, all-in-one-ai-assets-mossai-ap-northeast-1）
 
 **状态**: ✅ 通过
 
 ---
 
-### 测试 3: EC2 实例查询
+### 测试 3: aws_agent_execute 工具
 
-**目标**：验证 Agent 能查询 EC2 实例状态。
+**输入**: `{"task": "查看当前AWS账号ID"}`
 
-**输入**: `"查看us-east-1区域有哪些EC2实例在运行"`
-
-**结果**：Agent 成功返回 us-east-1 区域 **3 个运行中的 EC2 实例**：
-- AWS-DevOpsAgent-Test-Instance (t3.micro)
-- eks-client (t3.large)
-- proxy (t3.micro)
-
-包含实例 ID、IP 地址、安全组、IAM 角色等详细信息。
+**结果**: 返回 `340636688520`
 
 **状态**: ✅ 通过
 
 ---
 
-### 测试 4: Skill 加载与调用 (current_time)
+### 测试 4: Skill 激活 — aws-security-check
 
-**目标**：验证 builtin Skill 能通过配置文件加载，Agent 能正确调用。
+**输入**: `"请对当前AWS账号做一次安全检查，查看有没有安全隐患"`
 
-**配置**：
-```json
-{ "name": "current_time", "enabled": true, "type": "builtin", "module": "strands_tools.current_time" }
-```
+**验证**: Agent 自动激活了 `aws-security-check` SKILL.md（服务端日志确认 `Tool #2: skills` 被调用），然后按照 SKILL.md 中定义的检查清单系统性执行。
 
-**启动日志**：
-```
-AWS Agent ready with 1 MCP server(s) and 1 skill(s)
-```
+**结果摘要**：
+- 发现 2 个严重问题（Root 无 MFA、zpftest2 有 AdminAccess 无 MFA）
+- 发现 4 个高危问题（3 个安全组开放 0.0.0.0/0、密码策略未配置）
+- 发现 4 个中危问题（VPC Flow Logs 未启用等）
+- 综合评分：5/10
+- 给出 Top 3 优先处理建议
 
-**输入**: `"请告诉我现在的时间"`
-
-**结果**：Agent 调用 `current_time` skill，返回：**2026年4月29日 07:50:18（UTC）**
+**关键**: Agent 的输出格式（Severity/Resource/Issue/Remediation + 评分 + Top3）完全匹配 SKILL.md 中定义的 Output Format 规范。
 
 **状态**: ✅ 通过
 
 ---
 
-### 测试 5: MCP + Skill 混合工作
+### 测试 5: Skill 激活 — aws-cost-advisor
 
-**目标**：验证 MCP Server 和 Skill 同时加载后，AWS 操作仍然正常。
+**输入**: `"帮我分析一下当前AWS账号的费用情况，有没有优化空间"`
 
-**输入**: `"查看IAM用户列表"`
+**验证**: Agent 自动激活了 `aws-cost-advisor` SKILL.md（服务端日志确认 `Tool #6: skills` 被调用），然后按照 SKILL.md 的分析流程执行。
 
-**结果**：Agent 通过 aws-api-mcp-server 成功返回 **5 个 IAM 用户**（bedrock, ide-invoke, s3, zpftest2, zpftest3），包含用户 ID、创建时间、最后登录时间等信息。
+**结果摘要**：
+- 分析了 6 个月费用趋势（2025.10 ~ 2026.03）
+- 发现 3 月 RDS 异常暴增（$219 → $28,761）
+- 列出 Top 10 费用服务
+- 给出 8 项优化建议，总预估节省 $11,000~$22,000/月
+
+**关键**: Agent 按照 SKILL.md 定义的分析流程（Gather → Identify → Recommend）和输出格式（摘要 + 费用表 + 建议排序）执行。
 
 **状态**: ✅ 通过
 
@@ -116,32 +109,35 @@ AWS Agent ready with 1 MCP server(s) and 1 skill(s)
 
 ## 架构验证
 
-### 调用链路验证
+### 调用链路（含 Skill）
 ```
 Test Client (MCP Client)
     → HTTP POST http://localhost:8080/mcp/
     → Remote MCP Server (FastMCP, streamable-http)
         → aws_agent_chat tool
         → Strands Agent (Claude Sonnet 4.6 via Bedrock)
-            → MCPClient (stdio)
-            → aws-api-mcp-server (call_aws tool)
-                → AWS CLI → AWS API
-            ← 结果返回
-        ← Agent 格式化输出
+            ├── skills tool → 激活 SKILL.md（渐进式加载指令）
+            └── MCPClient (stdio) → aws-api-mcp-server → AWS CLI → AWS API
+        ← Agent 按 SKILL.md 格式输出
     ← MCP 响应
 ← 客户端收到结果
 ```
 
+### Skill 渐进式加载验证
+1. **Discovery 阶段**: Agent 系统提示中注入了 `<available_skills>` XML 列表（仅含 name + description）
+2. **Activation 阶段**: 当用户请求匹配 skill 时，Agent 调用 `skills` tool 加载完整 SKILL.md 指令
+3. **Execution 阶段**: Agent 按 SKILL.md 指令结合 MCP 工具执行操作
+
 ### 配置驱动验证
-- `agent_config.json` 中的 MCP Server 和 Skill 配置均成功加载
-- MCP Server 和 Skill 可以同时工作，互不干扰
-- 通过修改配置文件可以切换模型 ID、添加/禁用 MCP Server 和 Skill，无需修改代码
+- `agent_config.json` 中的 `skills` 数组配置 SKILL.md 路径
+- 支持本地目录 (`./skills/xxx`)、HTTPS URL、父目录批量加载
+- 设置 `"enabled": false` 可禁用 skill，无需删除文件
+- MCP 和 Skill 同时工作，互不干扰
 
 ## 结论
 
 所有测试用例均通过。系统成功实现了：
-1. **Strands Agent** 集成 **aws-api-mcp-server** (MCP) + **current_time** (Skill)
-2. Agent 封装为 **Remote MCP Server**，通过 streamable-http 对外暴露
-3. 外部客户端可通过标准 MCP 协议调用 Agent 能力
-4. **配置驱动架构**：MCP Server 和 Skill 均通过 `agent_config.json` 管理，新增/禁用只需改配置、重启服务
-5. 支持三种 Skill 类型：builtin（内置）、custom（自定义 .py）、package（pip 安装）
+1. **MCP 集成**: aws-api-mcp-server 提供 AWS CLI 操作能力
+2. **Skill 集成**: AgentSkills.io SKILL.md 格式，渐进式加载，按需激活
+3. **Agent 即服务**: 封装为 Remote MCP Server，外部 Agent 通过标准协议调用
+4. **配置驱动**: MCP Server 和 Skill 均通过 `agent_config.json` 管理，零代码扩展
